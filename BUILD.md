@@ -144,7 +144,10 @@ The script prints the location of all output files to `out/`.
 
 ### Full OTA packaging
 
-To also produce a complete `update.bin` compatible with the USB and OTA update mechanism, you additionally need a **base firmware** that provides the OS-level components (Linux kernel, bootloaders, and root filesystem) which are not included in this repository.
+To produce a complete `update.swu` + `update.bin` you need the OS-level
+components (Linux kernel, bootloaders, squashfs root filesystem, DSP firmware)
+which are **not** included in this repository.  There are two ways to supply
+them:
 
 **Prerequisites** (in addition to those listed in §1 and §2 above):
 
@@ -153,36 +156,79 @@ sudo apt-get install \
     cpio squashfs-tools zip unzip openssl python3
 ```
 
-**Steps:**
+---
 
-1. Download an official firmware release (the `.bin` file distributed by ELEGOO/ChituBox), for example version 1.1.25:
+#### Option A — Use a pre-populated `RESOURCES/` directory (recommended)
+
+This is the cleanest workflow if you have the component files already
+extracted or want to keep them in a known location across builds.
+
+1. **Populate `RESOURCES/components/`** — see
+   [`RESOURCES/components/README.md`](RESOURCES/components/README.md)
+   for detailed instructions.  In brief:
 
    ```bash
-   curl -L -o base.bin "https://download.chitubox.com/chitusystems/chitusystems/public/printer/firmware/release/1/ca8e1d9a20974a5896f8f744e780a8a7/1/1.1.25/2025-05-09/219b4c9e67de4a1d99c7680164911ab5.bin"
+   # Download an official ELEGOO firmware release
+   curl -L -o base.bin \
+     "https://download.chitubox.com/chitusystems/chitusystems/public/printer/firmware/release/1/ca8e1d9a20974a5896f8f744e780a8a7/1/01.01.46/2025-10-22/f9bd2b9b1926408ca238de8e7eac69b6.bin"
+
+   # Decrypt and unpack
+   python3 tools/cc_swu_decrypt.py base.bin /tmp/base.zip
+   unzip /tmp/base.zip -d /tmp/base_extracted
+
+   # Extract all component files into RESOURCES/components/
+   cd RESOURCES/components
+   cpio -idv < /tmp/base_extracted/update/update.swu
+   cd -
    ```
 
-2. Run `build.sh` with the base firmware:
+   After this step `RESOURCES/components/` will contain:
+   `boot0`, `uboot`, `boot-resource`, `kernel`, `rootfs`, `dsp0`,
+   `sw-description`.
+
+2. **Optionally add a signing key** — see
+   [`RESOURCES/KEYS/README.md`](RESOURCES/KEYS/README.md).
+
+3. **Build:**
 
    ```bash
-   ./build.sh -v 1.1.46 -p e100_lite -s base.bin
+   ./build.sh -v 1.1.46 -p e100_lite -r RESOURCES/
    ```
 
    The script will:
    1. Build the MCU firmware (`sg` and `extruder` targets)
    2. Build the firmware application
-   3. Decrypt the base `.bin` → extract `update.swu`
-   4. Unpack the `update.swu` CPIO archive → extract the squashfs root filesystem
-   5. Replace `/app/app` and the MCU firmware images inside the rootfs
-   6. Rebuild the squashfs rootfs (`mksquashfs -comp xz`)
-   7. Update all sha256 hashes in `sw-description`
-   8. Sign `sw-description` with your private key (see below)
-   9. Repack everything into a new `update.swu`
-   10. Zip and AES-256-CBC-encrypt the `.swu` into the final `update.bin`
+   3. Copy the pre-placed component files into a working directory
+   4. Inject the freshly built `app` and MCU firmware images into the rootfs
+   5. Rebuild the squashfs rootfs (`mksquashfs -comp xz`)
+   6. Update all sha256 hashes in `sw-description`
+   7. Sign `sw-description` (if `RESOURCES/KEYS/swupdate_private.pem` exists)
+   8. Repack everything into `out/update.swu`
+   9. Zip and AES-256-CBC-encrypt into `out/update_e100_lite_1.1.46.bin`
 
-3. Flash the resulting file:
-   - **USB update (.bin method):** rename `out/update_e100_lite_1.1.46.bin` to `update.bin` and place it in the root of a FAT32 USB drive.
-   - **USB update (.swu method):** copy `out/update.swu` to `<usb>/update/update.swu`.
-   - **OTA:** upload `out/update_e100_lite_1.1.46.bin` to your distribution service.
+---
+
+#### Option B — Point to a base firmware image directly
+
+If you prefer not to pre-extract the components, pass the base firmware
+image directly:
+
+```bash
+./build.sh -v 1.1.46 -p e100_lite -s base.bin
+```
+
+`build.sh` will decrypt, unpack, and inject automatically — same pipeline as
+Option A but extraction happens inline during the build.
+
+---
+
+4. Flash the resulting file:
+   - **USB update (.bin method):** rename `out/update_e100_lite_1.1.46.bin`
+     to `update.bin` and place it in the root of a FAT32 USB drive.
+   - **USB update (.swu method):** copy `out/update.swu` to
+     `<usb>/update/update.swu`.
+   - **OTA:** upload `out/update_e100_lite_1.1.46.bin` to your distribution
+     service.
 
 ### Firmware signing
 
@@ -193,6 +239,10 @@ To flash custom firmware you have two options:
 - **Jailbreak:** replace `/etc/swupdate_public.pem` on the printer with your own public key (see the [OpenCentauri project](https://github.com/OpenCentauri/cc-fw-tools) for guidance), then sign with your matching private key:
 
   ```bash
+  # With pre-placed RESOURCES/
+  ./build.sh -v 1.1.46 -p e100_lite -r RESOURCES/ -k path/to/private.pem
+
+  # With a base image
   ./build.sh -v 1.1.46 -p e100_lite -s base.bin -k path/to/private.pem
   ```
 

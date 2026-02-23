@@ -1,0 +1,11 @@
+# Build outputs
+out/
+
+# Python bytecode caches
+__pycache__/
+*.py[cod]
+
+# Temporary files produced by build scripts
+tools/__pycache__/
+*.tmp
+stage1.bin

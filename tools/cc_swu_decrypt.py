@@ -21,8 +21,10 @@ import subprocess
 import os
 import struct
 
-# AES-256-CBC key and IV hard-coded in the device firmware
-_KEY = "78B6A614B6B6E361DC84D705B7FDDA33C967DDF2970A689F8156F78EFE0B1FCE"
+# AES-256-CBC key and IV extracted from the Centauri Carbon device firmware.
+# The key was derived from the Anycubic Kobra 2 Pro key by brute-forcing the
+# last 3 bytes (same approach as the OpenCentauri cc-fw-tools project).
+_KEY = "78B6A614B6B6E361DC84D705B7FDDA33C967DDF2970A689F8156F78EFE0B0928"
 _IV  = "54E37626B9A699403064111F77858049"
 
 HEADER_SIZE = 0x20          # 32 bytes

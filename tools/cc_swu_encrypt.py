@@ -39,13 +39,12 @@ import os
 import struct
 import zipfile
 
-# AES-256-CBC key and IV hard-coded in the device firmware.
-# These values are publicly documented (they are embedded in the printer's
-# own application binary and have been reverse-engineered by the community).
-# They provide integrity/obfuscation, NOT real confidentiality — treat any
-# firmware package produced here as publicly readable by anyone who has the
-# same key material.
-_KEY = "78B6A614B6B6E361DC84D705B7FDDA33C967DDF2970A689F8156F78EFE0B1FCE"
+# AES-256-CBC key and IV extracted from the Centauri Carbon device firmware.
+# The key was derived from the Anycubic Kobra 2 Pro key by brute-forcing the
+# last 3 bytes (same approach as the OpenCentauri cc-fw-tools project).
+# These values are publicly known and provide obfuscation, NOT real
+# confidentiality — anyone with the same key can decrypt firmware packages.
+_KEY = "78B6A614B6B6E361DC84D705B7FDDA33C967DDF2970A689F8156F78EFE0B0928"
 _IV  = "54E37626B9A699403064111F77858049"
 
 OTA_MAGIC   = bytes([0x14, 0x17, 0x0B, 0x17])

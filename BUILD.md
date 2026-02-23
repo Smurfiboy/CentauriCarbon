@@ -134,10 +134,120 @@ make
 
 ## Building All Components
 
-There is currently no single top-level build script that builds all three components in one step. A suggested build order is:
+Use the top-level `build.sh` script to build the MCU firmware and the main application in one step:
 
-1. **Firmware** — has no dependency on the MCU or DSP build outputs.
-2. **MCU** — independent of firmware and DSP.
-3. **DSP** — independent of firmware and MCU, but requires the external Xtensa toolchain.
+```bash
+./build.sh -v 1.1.46 -p e100_lite
+```
+
+The script prints the location of all output files to `out/`.
+
+### Full OTA packaging
+
+To also produce a complete `update.bin` compatible with the USB and OTA update mechanism, you additionally need a **base firmware** that provides the OS-level components (Linux kernel, bootloaders, and root filesystem) which are not included in this repository.
+
+**Prerequisites** (in addition to those listed in §1 and §2 above):
+
+```bash
+sudo apt-get install \
+    cpio squashfs-tools zip unzip openssl python3
+```
+
+**Steps:**
+
+1. Download an official firmware release (the `.bin` file distributed by ELEGOO/ChituBox), for example version 1.1.25:
+
+   ```bash
+   curl -L -o base.bin "https://download.chitubox.com/chitusystems/chitusystems/public/printer/firmware/release/1/ca8e1d9a20974a5896f8f744e780a8a7/1/1.1.25/2025-05-09/219b4c9e67de4a1d99c7680164911ab5.bin"
+   ```
+
+2. Run `build.sh` with the base firmware:
+
+   ```bash
+   ./build.sh -v 1.1.46 -p e100_lite -s base.bin
+   ```
+
+   The script will:
+   1. Build the MCU firmware (`sg` and `extruder` targets)
+   2. Build the firmware application
+   3. Decrypt the base `.bin` → extract `update.swu`
+   4. Unpack the `update.swu` CPIO archive → extract the squashfs root filesystem
+   5. Replace `/app/app` and the MCU firmware images inside the rootfs
+   6. Rebuild the squashfs rootfs (`mksquashfs -comp xz`)
+   7. Update all sha256 hashes in `sw-description`
+   8. Sign `sw-description` with your private key (see below)
+   9. Repack everything into a new `update.swu`
+   10. Zip and AES-256-CBC-encrypt the `.swu` into the final `update.bin`
+
+3. Flash the resulting file:
+   - **USB update (.bin method):** rename `out/update_e100_lite_1.1.46.bin` to `update.bin` and place it in the root of a FAT32 USB drive.
+   - **USB update (.swu method):** copy `out/update.swu` to `<usb>/update/update.swu`.
+   - **OTA:** upload `out/update_e100_lite_1.1.46.bin` to your distribution service.
+
+### Firmware signing
+
+`swupdate` on the printer verifies `sw-description` against the public key in `/etc/swupdate_public.pem`. Stock printers use the ELEGOO signing key; you cannot sign with a compatible key without access to the ELEGOO private key.
+
+To flash custom firmware you have two options:
+
+- **Jailbreak:** replace `/etc/swupdate_public.pem` on the printer with your own public key (see the [OpenCentauri project](https://github.com/OpenCentauri/cc-fw-tools) for guidance), then sign with your matching private key:
+
+  ```bash
+  ./build.sh -v 1.1.46 -p e100_lite -s base.bin -k path/to/private.pem
+  ```
+
+- **Unsigned:** omit the key. `build.sh` will warn but continue; the resulting update will be rejected by stock firmware but accepted after jailbreaking.
+
+### OTA packaging tools
+
+Two Python helper scripts in `tools/` implement the encryption format:
+
+| Script | Purpose |
+|--------|---------|
+| `tools/cc_swu_decrypt.py` | Decrypt an official `.bin` → `.zip` (for inspection or as a build base) |
+| `tools/cc_swu_encrypt.py` | Encrypt a `.zip` or `.swu` → `.bin` (for USB/OTA distribution) |
+
+**Decrypt example:**
+
+```bash
+python3 tools/cc_swu_decrypt.py firmware.bin firmware.zip
+unzip firmware.zip -d firmware_extracted/
+# firmware_extracted/update/update.swu is a CPIO archive
+```
+
+**Encrypt example:**
+
+```bash
+# From a raw .swu
+python3 tools/cc_swu_encrypt.py update/update.swu update.bin 1 1 46
+
+# From a ZIP already containing update/update.swu
+python3 tools/cc_swu_encrypt.py firmware.zip update.bin 1 1 46 0
+```
+
+### Firmware update file format
+
+The `.bin` file layout is:
+
+```
+Offset  Size  Description
+──────  ────  ─────────────────────────────────────────────────────
+0x00     4    Magic bytes: 0x14 0x17 0x0B 0x17
+0x04     4    firmware_info: major, minor, patch, board_type
+0x08     4    custom_info: 0x01 0x00 0x00 0x00
+0x0C     4    Length of encrypted payload (little-endian uint32)
+0x10    16    MD5 hash of encrypted payload
+0x20     N    AES-256-CBC encrypted ZIP archive
+               └── update/update.swu  (SWUpdate CPIO archive)
+                    ├── sw-description        (libconfig metadata)
+                    ├── sw-description.sig    (RSA-SHA256 signature)
+                    ├── boot0                 (BROM first-stage loader)
+                    ├── uboot                 (U-Boot second-stage loader)
+                    ├── boot-resource         (boot splash / env resources)
+                    ├── kernel                (Linux kernel + DTB image)
+                    ├── rootfs                (squashfs root filesystem)
+                    ├── dsp0                  (Xtensa HiFi4 DSP firmware)
+                    └── cpio_item_md5         (MD5 manifest)
+```
 
 The pre-built MCU firmware images (`resources/firmware/upgrade_sg.bin`, `upgrade_extruder.bin`) that the firmware application bundles for OTA updates are already checked into the repository under `firmware/resources/firmware/` and do not need to be rebuilt unless the MCU firmware itself changes.

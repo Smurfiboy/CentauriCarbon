@@ -105,30 +105,39 @@ The script will:
 
 ## 3. DSP (Xtensa HiFi4)
 
-The DSP firmware runs on the Xtensa HiFi4 DSP core of the Allwinner R528. It is structured as a Kconfig + Make project (similar to a Linux kernel driver tree).
+The DSP firmware runs on the Xtensa HiFi4 DSP core of the Allwinner R528. It uses a top-level `dsp/Makefile` (analogous to the one in `mcu/`) that sets `CROSS_COMPILE`, generates `autoconf.h` from `.config`, and drives the `dsp/projects/r528/dsp0/` source tree.
 
 ### Prerequisites
 
 An Xtensa toolchain for the HiFi4 core used in the Allwinner R528 is required. This toolchain is **not** included in the repository and must be obtained separately (e.g. from Cadence / Tensilica or via the Allwinner BSP SDK).
 
-- Xtensa C/C++ compiler (`xt-xcc` or `xtensa-elf-gcc` depending on the variant)
+- Xtensa C/C++ compiler (`xtensa-elf-gcc` or equivalent; Cadence `xt-xcc` can be used by setting `CROSS_COMPILE`)
 - `make`
-- Kconfig tools (already available in `mcu/lib/kconfiglib/` and can be reused if the toolchain supports Python-based Kconfig)
+- `python3`
+
+Platform-specific headers (`console.h`, `platform.h`, `aw-alsa-lib/`, etc.) from the Allwinner R528 DSP SDK are also required for a complete build. Pass their location via `SDK_DIR`.
 
 ### Build steps
 
-The DSP project follows the same Kconfig + Make pattern as the MCU:
-
 ```bash
-cd dsp/projects
+cd dsp
 
-# Select the R528 DSP project configuration
-# (equivalent to running "make menuconfig" and enabling PROJECT_R528 / CORE_DSP0)
-# Then build:
+# Build using the default xtensa-elf- compiler prefix
 make
+
+# Or specify the cross-compiler prefix and SDK header directory explicitly:
+make CROSS_COMPILE=xtensa-elf- SDK_DIR=/path/to/r528-dsp-sdk
+
+# Using the convenience script:
+./build.sh -c xtensa-elf- -s /path/to/r528-dsp-sdk
 ```
 
-> **Note:** A complete, standalone top-level DSP Makefile with Kconfig integration (equivalent to the one in `mcu/`) is not yet present in this repository. The `dsp/projects/` directory contains only the source-level Makefile hierarchy. A top-level Makefile that sets `CROSS_COMPILE`, invokes `genconfig`, and drives the `dsp/projects/` subtree is needed before the DSP component can be built end-to-end.
+The R528 DSP0 configuration (`projects/r528/dsp0/defconfig`) is used by default.
+A `.config` file at `dsp/` will be created automatically if one is not already present.
+
+The resulting firmware images are written to `dsp/out/`:
+- `dsp0.elf` — ELF image (for JTAG debugging)
+- `dsp0.bin` — raw binary (for flashing as `dsp0` in the SWU archive)
 
 ---
 

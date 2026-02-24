@@ -10,6 +10,7 @@
 # Usage:
 #   ./build.sh [-v <version>] [-p <project>] [-s <base.bin|base.swu>]
 #   ./build.sh [-v <version>] [-p <project>] [-r <RESOURCES_DIR>]
+#   ./build.sh [-v <version>] [-p <project>] [-r <RESOURCES_DIR>] -d
 #
 # Options:
 #   -v <version>  Firmware version string, e.g. 1.1.46  (default: 1.0.0)
@@ -27,6 +28,12 @@
 #   -k <path>     Path to RSA private key for signing sw-description.
 #                 Defaults to <RESOURCES_DIR>/KEYS/swupdate_private.pem when
 #                 -r is used, or RESOURCES/KEYS/swupdate_private.pem otherwise.
+#   -d            Build the DSP firmware from the oc-freertos-dsp submodule
+#                 and inject it as the dsp0 component in the OTA package.
+#                 Requires the HiFi4 toolchain to be installed first:
+#                   git submodule update --init dsp/oc-freertos-dsp
+#                   dsp/toolchain/fetch.sh
+#                 Only effective when -s or -r is also provided.
 #
 # Full-packaging prerequisites (only needed when -s or -r is provided):
 #   cpio unsquashfs mksquashfs zip unzip openssl python3
@@ -50,17 +57,19 @@ TARGET="e100_lite"
 BASE_IMG=""
 RESOURCES_DIR=""
 SIGN_KEY=""
+BUILD_DSP=""
 ROOTFS_MAX_SIZE=$(( 128 * 1024 * 1024 ))   # 128 MiB — matches rootfsA/B partition size
 
 # ── Parse arguments ───────────────────────────────────────────────────────────
-while getopts "v:p:s:r:k:" flag; do
+while getopts "v:p:s:r:k:d" flag; do
     case "${flag}" in
         v) VERSION=${OPTARG};;
         p) TARGET=${OPTARG};;
         s) BASE_IMG=${OPTARG};;
         r) RESOURCES_DIR=${OPTARG};;
         k) SIGN_KEY=${OPTARG};;
-        *) echo "Usage: $0 [-v version] [-p e100|e100_lite] [-s base.bin|base.swu] [-r RESOURCES_DIR] [-k signing.pem]"
+        d) BUILD_DSP="yes";;
+        *) echo "Usage: $0 [-v version] [-p e100|e100_lite] [-s base.bin|base.swu] [-r RESOURCES_DIR] [-k signing.pem] [-d]"
            exit 1;;
     esac
 done
@@ -100,6 +109,9 @@ elif [ -n "$RESOURCES_DIR" ]; then
 else
     echo "   Base    : <none – app & MCU only>"
 fi
+if [ -n "$BUILD_DSP" ]; then
+    echo "   DSP     : oc-freertos-dsp (custom FreeRTOS DSP firmware)"
+fi
 echo "============================================================"
 
 # ── Step 1: MCU firmware (STM32F401) ─────────────────────────────────────────
@@ -132,6 +144,14 @@ bash autoreleash.sh -p "$TARGET"
 APP_BIN="$SCRIPT_DIR/firmware/build/app"
 cp -v "$APP_BIN" "$OUT_DIR/app"
 
+# ── Step 2b (optional): DSP firmware (oc-freertos-dsp) ───────────────────────
+if [ -n "$BUILD_DSP" ]; then
+    echo ""
+    echo "=== [2b] Building DSP firmware (oc-freertos-dsp) ==="
+    cd "$SCRIPT_DIR/dsp"
+    bash build.sh
+fi
+
 # ── Step 3: Package into update.swu / update.bin ─────────────────────────────
 echo ""
 if [ -z "$BASE_IMG" ] && [ -z "$RESOURCES_DIR" ]; then
@@ -141,6 +161,9 @@ if [ -z "$BASE_IMG" ] && [ -z "$RESOURCES_DIR" ]; then
     echo "  app                            — main firmware application"
     echo "  upgrade_sg_${VERSION}_full_pack.bin     — MCU sg full-pack"
     echo "  upgrade_extruder_${VERSION}_full_pack.bin — MCU extruder full-pack"
+    if [ -n "$BUILD_DSP" ]; then
+        echo "  dsp0                           — oc-freertos-dsp raw binary"
+    fi
     echo ""
     echo "To build a complete update.swu + update.bin, re-run with one of:"
     echo "  $0 -v $VERSION -p $TARGET -s path/to/base.bin"
@@ -215,7 +238,13 @@ else
     done
 fi
 
-# ── 3b. Replace rootfs application binary ────────────────────────────────────
+# ── 3b. Optionally replace the dsp0 component with a custom build ─────────────
+if [ -n "$BUILD_DSP" ] && [ -f "$SCRIPT_DIR/dsp/out/dsp0.bin" ]; then
+    echo "Replacing dsp0 component with oc-freertos-dsp build …"
+    cp "$SCRIPT_DIR/dsp/out/dsp0.bin" "$WORK_DIR/dsp0"
+fi
+
+# ── 3c. Replace rootfs application binary ────────────────────────────────────
 echo "Replacing /app/app and MCU firmware in rootfs …"
 cd "$WORK_DIR"
 unsquashfs -d squashfs-root rootfs
@@ -228,7 +257,7 @@ install -v -m 0644 \
     "$SCRIPT_DIR/firmware/resources/firmware/upgrade_extruder.bin" \
     squashfs-root/lib/firmware/upgrade_extruder.bin
 
-# ── 3c. Rebuild squashfs rootfs ───────────────────────────────────────────────
+# ── 3d. Rebuild squashfs rootfs ───────────────────────────────────────────────
 echo "Rebuilding squashfs rootfs …"
 rm -f rootfs
 mksquashfs squashfs-root rootfs -comp xz -all-root
@@ -239,7 +268,7 @@ if [ "$ROOTFS_SIZE" -ge $(( ROOTFS_MAX_SIZE + 1 )) ]; then
     exit 1
 fi
 
-# ── 3d. Update sha256 hashes in sw-description ───────────────────────────────
+# ── 3e. Update sha256 hashes in sw-description ───────────────────────────────
 echo "Updating sha256 hashes in sw-description …"
 for component in boot-resource uboot boot0 kernel rootfs dsp0; do
     [ -f "$component" ] || continue
@@ -259,7 +288,7 @@ for component in boot-resource uboot boot0 kernel rootfs dsp0; do
     fi
 done
 
-# ── 3e. Sign sw-description ───────────────────────────────────────────────────
+# ── 3f. Sign sw-description ───────────────────────────────────────────────────
 if [ -f "$SIGN_KEY" ]; then
     echo "Signing sw-description with $SIGN_KEY …"
     rm -f sw-description.sig
@@ -270,14 +299,14 @@ else
     echo "         Place your private key there or use -k <path>"
 fi
 
-# ── 3f. Rebuild cpio_item_md5 ─────────────────────────────────────────────────
+# ── 3g. Rebuild cpio_item_md5 ─────────────────────────────────────────────────
 echo "Rebuilding cpio_item_md5 …"
 rm -f cpio_item_md5
 for f in sw-description sw-description.sig boot-resource uboot boot0 kernel rootfs dsp0; do
     [ -f "$f" ] && md5sum "$f" >> cpio_item_md5
 done
 
-# ── 3g. Pack new update.swu (CPIO) ───────────────────────────────────────────
+# ── 3h. Pack new update.swu (CPIO) ───────────────────────────────────────────
 NEW_SWU="$OUT_DIR/update.swu"
 echo "Packing new update.swu …"
 for f in sw-description sw-description.sig \
@@ -286,7 +315,7 @@ for f in sw-description sw-description.sig \
 done | cpio -ov -H crc > "$NEW_SWU"
 echo "Created: $NEW_SWU"
 
-# ── 3h. Zip and encrypt into update.bin ──────────────────────────────────────
+# ── 3i. Zip and encrypt into update.bin ──────────────────────────────────────
 echo "Creating update.bin …"
 
 # Build the ZIP (update/update.swu inside)

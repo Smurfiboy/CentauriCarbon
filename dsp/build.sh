@@ -66,6 +66,20 @@ cd "${SUBMODULE_DIR}"
 # submodule's Makefile uses its own default (./tools/xtensa-hifi4-gcc/bin/…).
 make -j"$(nproc)" ${CROSS_COMPILE_ARG}
 
+# ── Copy outputs to dsp/out/ for OTA pipeline use ─────────────────────────────
+# Resolve the objcopy binary to use (from the overridden or default toolchain).
+if [ -n "${CROSS_COMPILE_ARG}" ]; then
+    _OBJCOPY="$(echo "${CROSS_COMPILE_ARG}" | sed 's/CROSS_COMPILE=//')objcopy"
+else
+    _OBJCOPY="${TC_BIN}/xtensa-hifi4-elf-objcopy"
+fi
+
+mkdir -p "${SCRIPT_DIR}/out"
+cp "${SUBMODULE_DIR}/build/dsp.elf" "${SCRIPT_DIR}/out/dsp0.elf"
+"${_OBJCOPY}" -O binary "${SCRIPT_DIR}/out/dsp0.elf" "${SCRIPT_DIR}/out/dsp0.bin"
+
 echo ""
 echo "DSP build complete.  Output files:"
 echo "  ${SUBMODULE_DIR}/build/dsp.elf"
+echo "  ${SCRIPT_DIR}/out/dsp0.elf"
+echo "  ${SCRIPT_DIR}/out/dsp0.bin  (raw binary for OTA dsp0 component)"

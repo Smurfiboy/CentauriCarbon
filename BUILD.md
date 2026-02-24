@@ -157,7 +157,9 @@ make
 make CROSS_COMPILE=xtensa-hifi4-elf-
 ```
 
-The resulting firmware ELF is written to `dsp/oc-freertos-dsp/build/dsp.elf`.
+The resulting firmware ELF is written to `dsp/oc-freertos-dsp/build/dsp.elf` and
+also copied to `dsp/out/dsp0.elf` / `dsp/out/dsp0.bin` (raw binary) for use
+as the OTA `dsp0` component.
 
 ### Deploying to the printer
 
@@ -172,6 +174,18 @@ Use the top-level `build.sh` script to build the MCU firmware and the main appli
 
 ```bash
 ./build.sh -v 1.1.46 -p e100_lite
+```
+
+Add `-d` to also build the DSP firmware from the `oc-freertos-dsp` submodule
+and include it in the OTA package:
+
+```bash
+# First-time setup: initialize the submodule and fetch the HiFi4 toolchain
+git submodule update --init dsp/oc-freertos-dsp
+dsp/toolchain/fetch.sh
+
+# Build everything including custom DSP firmware
+./build.sh -v 1.1.46 -p e100_lite -r RESOURCES/ -d
 ```
 
 The script prints the location of all output files to `out/`.

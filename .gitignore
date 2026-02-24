@@ -1,6 +1,10 @@
 # Build outputs
 out/
 
+# Downloaded Xtensa HiFi4 toolchain (fetch via dsp/toolchain/fetch.sh)
+# Installed into the submodule's tools/ directory
+dsp/oc-freertos-dsp/tools/xtensa-hifi4-gcc/
+
 # Python bytecode caches
 __pycache__/
 *.py[cod]

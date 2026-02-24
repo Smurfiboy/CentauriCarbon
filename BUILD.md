@@ -6,7 +6,7 @@ This repository contains three independently buildable subsystems for the ELEGOO
 |-----------|-----------|--------|-----------|
 | Firmware  | `firmware/` | ARM Cortex-A (R528 main CPU) | `arm-openwrt-linux-gcc` (included) |
 | MCU       | `mcu/`      | STM32F401 (real-time MCU)   | `gcc-arm-none-eabi` (must be installed) |
-| DSP       | `dsp/`      | Xtensa HiFi4 DSP (R528 DSP core) | Xtensa toolchain (must be obtained separately) |
+| DSP       | `dsp/`      | Xtensa HiFi4 DSP (R528 DSP core) | `xtensa-hifi4-elf-gcc` (fetched by `dsp/toolchain/fetch.sh`) |
 
 ---
 
@@ -105,30 +105,66 @@ The script will:
 
 ## 3. DSP (Xtensa HiFi4)
 
-The DSP firmware runs on the Xtensa HiFi4 DSP core of the Allwinner R528. It is structured as a Kconfig + Make project (similar to a Linux kernel driver tree).
+The DSP firmware runs on the Xtensa HiFi4 DSP core of the Allwinner R528. It is
+provided by the **[OpenCentauri/oc-freertos-dsp](https://github.com/OpenCentauri/oc-freertos-dsp)**
+submodule (`dsp/oc-freertos-dsp/`) — a community port of FreeRTOS for the R528 HiFi4 core.
+
+### Toolchain
+
+The correct toolchain is the purpose-built `xtensa-hifi4-elf` GCC, available via:
+
+```bash
+# Initialise the submodule if you haven't already
+git submodule update --init dsp/oc-freertos-dsp
+
+# Download the HiFi4 GCC toolchain (~60 MB) and install it into the submodule
+dsp/toolchain/fetch.sh
+```
+
+This downloads `xtensa-hifi4-dsp.tar.gz` from
+[github.com/YuzukiHD/FreeRTOS-HIFI4-DSP](https://github.com/YuzukiHD/FreeRTOS-HIFI4-DSP/releases/tag/Toolchains),
+verifies its SHA-512 checksum, and extracts it into
+`dsp/oc-freertos-dsp/tools/xtensa-hifi4-gcc/` — exactly where the submodule's
+Makefile expects it.
 
 ### Prerequisites
 
-An Xtensa toolchain for the HiFi4 core used in the Allwinner R528 is required. This toolchain is **not** included in the repository and must be obtained separately (e.g. from Cadence / Tensilica or via the Allwinner BSP SDK).
-
-- Xtensa C/C++ compiler (`xt-xcc` or `xtensa-elf-gcc` depending on the variant)
+- `git` (to initialise the submodule)
+- `curl`, `sha512sum`, `tar` (for `toolchain/fetch.sh`)
 - `make`
-- Kconfig tools (already available in `mcu/lib/kconfiglib/` and can be reused if the toolchain supports Python-based Kconfig)
 
 ### Build steps
 
-The DSP project follows the same Kconfig + Make pattern as the MCU:
-
 ```bash
-cd dsp/projects
+# 1. Initialise the DSP submodule (one-time)
+git submodule update --init dsp/oc-freertos-dsp
 
-# Select the R528 DSP project configuration
-# (equivalent to running "make menuconfig" and enabling PROJECT_R528 / CORE_DSP0)
-# Then build:
-make
+# 2. Fetch the HiFi4 toolchain (one-time)
+dsp/toolchain/fetch.sh
+
+# 3. Build
+cd dsp
+./build.sh
 ```
 
-> **Note:** A complete, standalone top-level DSP Makefile with Kconfig integration (equivalent to the one in `mcu/`) is not yet present in this repository. The `dsp/projects/` directory contains only the source-level Makefile hierarchy. A top-level Makefile that sets `CROSS_COMPILE`, invokes `genconfig`, and drives the `dsp/projects/` subtree is needed before the DSP component can be built end-to-end.
+Alternatively, using `make` directly from `dsp/`:
+
+```bash
+cd dsp
+make
+
+# Override cross-compiler prefix if needed:
+make CROSS_COMPILE=xtensa-hifi4-elf-
+```
+
+The resulting firmware ELF is written to `dsp/oc-freertos-dsp/build/dsp.elf` and
+also copied to `dsp/out/dsp0.elf` / `dsp/out/dsp0.bin` (raw binary) for use
+as the OTA `dsp0` component.
+
+### Deploying to the printer
+
+See the [oc-freertos-dsp README](dsp/oc-freertos-dsp/README.md) for full
+deployment instructions (USB-stick boot via U-Boot, etc.).
 
 ---
 
@@ -138,6 +174,18 @@ Use the top-level `build.sh` script to build the MCU firmware and the main appli
 
 ```bash
 ./build.sh -v 1.1.46 -p e100_lite
+```
+
+Add `-d` to also build the DSP firmware from the `oc-freertos-dsp` submodule
+and include it in the OTA package:
+
+```bash
+# First-time setup: initialize the submodule and fetch the HiFi4 toolchain
+git submodule update --init dsp/oc-freertos-dsp
+dsp/toolchain/fetch.sh
+
+# Build everything including custom DSP firmware
+./build.sh -v 1.1.46 -p e100_lite -r RESOURCES/ -d
 ```
 
 The script prints the location of all output files to `out/`.

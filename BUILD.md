@@ -6,7 +6,7 @@ This repository contains three independently buildable subsystems for the ELEGOO
 |-----------|-----------|--------|-----------|
 | Firmware  | `firmware/` | ARM Cortex-A (R528 main CPU) | `arm-openwrt-linux-gcc` (included) |
 | MCU       | `mcu/`      | STM32F401 (real-time MCU)   | `gcc-arm-none-eabi` (must be installed) |
-| DSP       | `dsp/`      | Xtensa HiFi4 DSP (R528 DSP core) | Xtensa toolchain (must be obtained separately) |
+| DSP       | `dsp/`      | Xtensa HiFi4 DSP (R528 DSP core) | `xtensa-test_kc705_hifi-elf-gcc` (fetched by `dsp/toolchain/fetch.sh`) |
 
 ---
 
@@ -107,29 +107,54 @@ The script will:
 
 The DSP firmware runs on the Xtensa HiFi4 DSP core of the Allwinner R528. It uses a top-level `dsp/Makefile` (analogous to the one in `mcu/`) that sets `CROSS_COMPILE`, generates `autoconf.h` from `.config`, and drives the `dsp/projects/r528/dsp0/` source tree.
 
+### Toolchain
+
+The Allwinner R528 DSP requires an Xtensa cross-compiler. A pre-built open-source toolchain is available via the included fetch script:
+
+```bash
+# Download the foss-xtensa HiFi4 toolchain (~130 MB) into dsp/toolchain/
+dsp/toolchain/fetch.sh
+```
+
+This downloads the `test_kc705_hifi` Xtensa GCC toolchain (2020.07 release) from
+[github.com/foss-xtensa/toolchain](https://github.com/foss-xtensa/toolchain/releases/tag/2020.07),
+verifies its SHA-512 checksum, and installs it to `dsp/toolchain/2020.07/xtensa-test_kc705_hifi-elf/`.
+Once installed, `dsp/build.sh` and `dsp/Makefile` detect it automatically — no extra flags needed.
+
+> **Note on hardware compatibility:** The `test_kc705_hifi` configuration is a
+> HiFi4 reference design and can compile and link the DSP firmware source.
+> For a binary that maps exactly to the R528's HiFi4 core (memory layout, LSP,
+> register-window config), you additionally need the proprietary core-pack and
+> LSP files from the Allwinner / Cadence SDK.  Passing those via `SDK_DIR` is
+> documented in the build steps below.
+
 ### Prerequisites
 
-An Xtensa toolchain for the HiFi4 core used in the Allwinner R528 is required. This toolchain is **not** included in the repository and must be obtained separately (e.g. from Cadence / Tensilica or via the Allwinner BSP SDK).
-
-- Xtensa C/C++ compiler (`xtensa-elf-gcc` or equivalent; Cadence `xt-xcc` can be used by setting `CROSS_COMPILE`)
+- `curl`, `sha512sum`, `tar` (for `toolchain/fetch.sh`)
 - `make`
 - `python3`
 
-Platform-specific headers (`console.h`, `platform.h`, `aw-alsa-lib/`, etc.) from the Allwinner R528 DSP SDK are also required for a complete build. Pass their location via `SDK_DIR`.
+Platform-specific headers (`console.h`, `platform.h`, `aw-alsa-lib/`, etc.) from the Allwinner R528 DSP SDK are required for a complete build. Pass their location via `SDK_DIR`.
 
 ### Build steps
 
 ```bash
+# 1. Fetch the Xtensa toolchain (one-time setup)
+dsp/toolchain/fetch.sh
+
+# 2. Build the DSP firmware
 cd dsp
+./build.sh
 
-# Build using the default xtensa-elf- compiler prefix
+# Or specify an SDK header directory for a more complete build:
+./build.sh -s /path/to/r528-dsp-sdk
+
+# Direct make invocation (toolchain auto-detected if installed by fetch.sh):
 make
+make SDK_DIR=/path/to/r528-dsp-sdk
 
-# Or specify the cross-compiler prefix and SDK header directory explicitly:
-make CROSS_COMPILE=xtensa-elf- SDK_DIR=/path/to/r528-dsp-sdk
-
-# Using the convenience script:
-./build.sh -c xtensa-elf- -s /path/to/r528-dsp-sdk
+# Override toolchain prefix (e.g. to use Cadence XCC or a custom toolchain):
+make CROSS_COMPILE=xt-
 ```
 
 The R528 DSP0 configuration (`projects/r528/dsp0/defconfig`) is used by default.

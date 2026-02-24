@@ -23,7 +23,17 @@ export KCONFIG_CONFIG := $(CURDIR)/.config
 # Cross-compiler (Xtensa GNU toolchain — set CROSS_COMPILE or ensure the
 # compiler is in PATH).  The Cadence XCC toolchain may be used by setting
 # CROSS_COMPILE to the appropriate prefix (e.g. "xt-").
+#
+# Auto-detect the toolchain installed by dsp/toolchain/fetch.sh, falling
+# back to xtensa-elf- if a compiler is already in PATH.
+# The wildcard is version-agnostic so a toolchain upgrade only requires
+# re-running toolchain/fetch.sh without editing this Makefile.
+_DSP_TC_BIN := $(firstword $(wildcard $(CURDIR)/toolchain/*/xtensa-test_kc705_hifi-elf/bin))
+ifneq ($(_DSP_TC_BIN),)
+CROSS_COMPILE ?= $(_DSP_TC_BIN)/xtensa-test_kc705_hifi-elf-
+else
 CROSS_COMPILE ?= xtensa-elf-
+endif
 CC      := $(CROSS_COMPILE)gcc
 AS      := $(CROSS_COMPILE)as
 LD      := $(CROSS_COMPILE)ld

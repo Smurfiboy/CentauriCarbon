@@ -6,7 +6,7 @@ This repository contains three independently buildable subsystems for the ELEGOO
 |-----------|-----------|--------|-----------|
 | Firmware  | `firmware/` | ARM Cortex-A (R528 main CPU) | `arm-openwrt-linux-gcc` (included) |
 | MCU       | `mcu/`      | STM32F401 (real-time MCU)   | `gcc-arm-none-eabi` (must be installed) |
-| DSP       | `dsp/`      | Xtensa HiFi4 DSP (R528 DSP core) | `xtensa-test_kc705_hifi-elf-gcc` (fetched by `dsp/toolchain/fetch.sh`) |
+| DSP       | `dsp/`      | Xtensa HiFi4 DSP (R528 DSP core) | `xtensa-hifi4-elf-gcc` (fetched by `dsp/toolchain/fetch.sh`) |
 
 ---
 
@@ -105,64 +105,64 @@ The script will:
 
 ## 3. DSP (Xtensa HiFi4)
 
-The DSP firmware runs on the Xtensa HiFi4 DSP core of the Allwinner R528. It uses a top-level `dsp/Makefile` (analogous to the one in `mcu/`) that sets `CROSS_COMPILE`, generates `autoconf.h` from `.config`, and drives the `dsp/projects/r528/dsp0/` source tree.
+The DSP firmware runs on the Xtensa HiFi4 DSP core of the Allwinner R528. It is
+provided by the **[OpenCentauri/oc-freertos-dsp](https://github.com/OpenCentauri/oc-freertos-dsp)**
+submodule (`dsp/oc-freertos-dsp/`) — a community port of FreeRTOS for the R528 HiFi4 core.
 
 ### Toolchain
 
-The Allwinner R528 DSP requires an Xtensa cross-compiler. A pre-built open-source toolchain is available via the included fetch script:
+The correct toolchain is the purpose-built `xtensa-hifi4-elf` GCC, available via:
 
 ```bash
-# Download the foss-xtensa HiFi4 toolchain (~130 MB) into dsp/toolchain/
+# Initialise the submodule if you haven't already
+git submodule update --init dsp/oc-freertos-dsp
+
+# Download the HiFi4 GCC toolchain (~60 MB) and install it into the submodule
 dsp/toolchain/fetch.sh
 ```
 
-This downloads the `test_kc705_hifi` Xtensa GCC toolchain (2020.07 release) from
-[github.com/foss-xtensa/toolchain](https://github.com/foss-xtensa/toolchain/releases/tag/2020.07),
-verifies its SHA-512 checksum, and installs it to `dsp/toolchain/2020.07/xtensa-test_kc705_hifi-elf/`.
-Once installed, `dsp/build.sh` and `dsp/Makefile` detect it automatically — no extra flags needed.
-
-> **Note on hardware compatibility:** The `test_kc705_hifi` configuration is a
-> HiFi4 reference design and can compile and link the DSP firmware source.
-> For a binary that maps exactly to the R528's HiFi4 core (memory layout, LSP,
-> register-window config), you additionally need the proprietary core-pack and
-> LSP files from the Allwinner / Cadence SDK.  Passing those via `SDK_DIR` is
-> documented in the build steps below.
+This downloads `xtensa-hifi4-dsp.tar.gz` from
+[github.com/YuzukiHD/FreeRTOS-HIFI4-DSP](https://github.com/YuzukiHD/FreeRTOS-HIFI4-DSP/releases/tag/Toolchains),
+verifies its SHA-512 checksum, and extracts it into
+`dsp/oc-freertos-dsp/tools/xtensa-hifi4-gcc/` — exactly where the submodule's
+Makefile expects it.
 
 ### Prerequisites
 
+- `git` (to initialise the submodule)
 - `curl`, `sha512sum`, `tar` (for `toolchain/fetch.sh`)
 - `make`
-- `python3`
-
-Platform-specific headers (`console.h`, `platform.h`, `aw-alsa-lib/`, etc.) from the Allwinner R528 DSP SDK are required for a complete build. Pass their location via `SDK_DIR`.
 
 ### Build steps
 
 ```bash
-# 1. Fetch the Xtensa toolchain (one-time setup)
+# 1. Initialise the DSP submodule (one-time)
+git submodule update --init dsp/oc-freertos-dsp
+
+# 2. Fetch the HiFi4 toolchain (one-time)
 dsp/toolchain/fetch.sh
 
-# 2. Build the DSP firmware
+# 3. Build
 cd dsp
 ./build.sh
-
-# Or specify an SDK header directory for a more complete build:
-./build.sh -s /path/to/r528-dsp-sdk
-
-# Direct make invocation (toolchain auto-detected if installed by fetch.sh):
-make
-make SDK_DIR=/path/to/r528-dsp-sdk
-
-# Override toolchain prefix (e.g. to use Cadence XCC or a custom toolchain):
-make CROSS_COMPILE=xt-
 ```
 
-The R528 DSP0 configuration (`projects/r528/dsp0/defconfig`) is used by default.
-A `.config` file at `dsp/` will be created automatically if one is not already present.
+Alternatively, using `make` directly from `dsp/`:
 
-The resulting firmware images are written to `dsp/out/`:
-- `dsp0.elf` — ELF image (for JTAG debugging)
-- `dsp0.bin` — raw binary (for flashing as `dsp0` in the SWU archive)
+```bash
+cd dsp
+make
+
+# Override cross-compiler prefix if needed:
+make CROSS_COMPILE=xtensa-hifi4-elf-
+```
+
+The resulting firmware ELF is written to `dsp/oc-freertos-dsp/build/dsp.elf`.
+
+### Deploying to the printer
+
+See the [oc-freertos-dsp README](dsp/oc-freertos-dsp/README.md) for full
+deployment instructions (USB-stick boot via U-Boot, etc.).
 
 ---
 

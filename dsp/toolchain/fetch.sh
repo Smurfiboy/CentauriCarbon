@@ -1,24 +1,21 @@
 #!/bin/bash
 # CentauriCarbon — Xtensa HiFi4 DSP toolchain fetch script
 #
-# Downloads the pre-built Xtensa toolchain from the foss-xtensa project on
-# GitHub (https://github.com/foss-xtensa/toolchain) and installs it into
-# dsp/toolchain/ so that dsp/build.sh and dsp/Makefile can use it
-# automatically.
+# Downloads the pre-built xtensa-hifi4-elf GCC toolchain published by
+# YuzukiHD / OpenCentauri at
+#   https://github.com/YuzukiHD/FreeRTOS-HIFI4-DSP/releases/tag/Toolchains
 #
-# The toolchain used is the "test_kc705_hifi" HiFi4 reference configuration,
-# which is the closest publicly available Xtensa GCC toolchain to the HiFi4
-# core inside the Allwinner R528.  It allows the DSP firmware to be compiled
-# and linked; for a binary that matches the exact R528 core (memory map,
-# register-window config, etc.) you additionally need the proprietary LSP and
-# core-pack files from the Allwinner / Cadence SDK.
+# This is the same toolchain used by the oc-freertos-dsp submodule
+# (dsp/oc-freertos-dsp/).  The submodule's Makefile expects the toolchain
+# at <submodule-dir>/tools/xtensa-hifi4-gcc/, which is the default install
+# location used by this script.
 #
 # Usage:
-#   ./fetch.sh               # install into dsp/toolchain/ (default)
+#   ./fetch.sh               # install into dsp/oc-freertos-dsp/tools/xtensa-hifi4-gcc/
 #   ./fetch.sh -d <dir>      # install into a custom directory
 #
-# After running this script, dsp/build.sh and dsp/Makefile will detect the
-# toolchain automatically.
+# After running this script, dsp/build.sh will call make inside oc-freertos-dsp
+# automatically.
 # =============================================================================
 
 set -euo pipefail
@@ -26,15 +23,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ── Toolchain metadata ────────────────────────────────────────────────────────
-TC_RELEASE="2020.07"
-TC_VARIANT="xtensa-test_kc705_hifi-elf"
-TC_ARCHIVE="x86_64-${TC_RELEASE}-${TC_VARIANT}.tar.gz"
-TC_URL="https://github.com/foss-xtensa/toolchain/releases/download/${TC_RELEASE}/${TC_ARCHIVE}"
-# SHA-512 checksum published on the foss-xtensa release page
-TC_SHA512="389d4089af518b1065514adaf70b0ba577933513360af95847c1d05a2b9d5edb3e414ef081f923b11364ac828c87470edf2f9ceb3ff4a04830854f19131383c3"
+TC_ARCHIVE="xtensa-hifi4-dsp.tar.gz"
+TC_URL="https://github.com/YuzukiHD/FreeRTOS-HIFI4-DSP/releases/download/Toolchains/${TC_ARCHIVE}"
+TC_COMPILER_PREFIX="xtensa-hifi4-elf-"
+# SHA-512 of the released xtensa-hifi4-dsp.tar.gz
+TC_SHA512="c155fd717d5948fc65e20658a32feb55c77fa8c49907a4389b051b39feaa1b9cc398028f7f3fc5bd8ccfa46596ea9bcd85a39ca4f7c861a8571313637542fda8"
 
 # ── Default install directory ─────────────────────────────────────────────────
-INSTALL_DIR="${SCRIPT_DIR}"
+# The oc-freertos-dsp Makefile uses: CROSS_COMPILE ?= ./tools/xtensa-hifi4-gcc/bin/xtensa-hifi4-elf-
+# So we install the toolchain into that directory by default.
+SUBMODULE_DIR="${SCRIPT_DIR}/../oc-freertos-dsp"
+INSTALL_DIR="${SUBMODULE_DIR}/tools/xtensa-hifi4-gcc"
 
 # ── Parse arguments ───────────────────────────────────────────────────────────
 while getopts "d:" flag; do
@@ -44,21 +43,17 @@ while getopts "d:" flag; do
     esac
 done
 
-TC_BIN="${INSTALL_DIR}/${TC_RELEASE}/${TC_VARIANT}/bin"
-
 # ── Check if already installed ────────────────────────────────────────────────
-if [ -x "${TC_BIN}/${TC_VARIANT}-gcc" ]; then
-    echo "Xtensa toolchain already installed at ${TC_BIN}"
-    echo "  Compiler: ${TC_BIN}/${TC_VARIANT}-gcc"
-    echo "  CROSS_COMPILE=${TC_VARIANT}-"
+if [ -x "${INSTALL_DIR}/bin/${TC_COMPILER_PREFIX}gcc" ]; then
+    echo "Xtensa HiFi4 toolchain already installed at ${INSTALL_DIR}"
+    echo "  Compiler: ${INSTALL_DIR}/bin/${TC_COMPILER_PREFIX}gcc"
     exit 0
 fi
 
 echo "============================================================"
 echo " Fetching Xtensa HiFi4 toolchain"
-echo "   Release : ${TC_RELEASE}"
-echo "   Variant : ${TC_VARIANT}"
-echo "   Install : ${INSTALL_DIR}/${TC_RELEASE}/${TC_VARIANT}/"
+echo "   Source  : ${TC_URL}"
+echo "   Install : ${INSTALL_DIR}"
 echo "============================================================"
 
 # ── Dependency checks ─────────────────────────────────────────────────────────
@@ -68,6 +63,20 @@ for cmd in curl sha512sum tar; do
         exit 1
     fi
 done
+
+# ── Check that the submodule has been initialised ─────────────────────────────
+# We check for Makefile presence — this is the reliable portable test that
+# works even outside a git context (e.g. in a tarball extraction).
+if [ ! -f "${SUBMODULE_DIR}/Makefile" ]; then
+    echo ""
+    echo "Error: oc-freertos-dsp submodule is not initialised at:"
+    echo "  ${SUBMODULE_DIR}"
+    echo ""
+    echo "Run one of the following from the repository root:"
+    echo "  git submodule update --init dsp/oc-freertos-dsp"
+    echo "  git submodule update --init --recursive"
+    exit 1
+fi
 
 # ── Download ──────────────────────────────────────────────────────────────────
 TMPDIR_WORK="$(mktemp -d)"
@@ -100,9 +109,9 @@ mkdir -p "${INSTALL_DIR}"
 tar -xzf "${ARCHIVE_PATH}" -C "${INSTALL_DIR}"
 
 # ── Verify installation ───────────────────────────────────────────────────────
-if [ ! -x "${TC_BIN}/${TC_VARIANT}-gcc" ]; then
+if [ ! -x "${INSTALL_DIR}/bin/${TC_COMPILER_PREFIX}gcc" ]; then
     echo "Error: extraction succeeded but compiler not found at expected path:"
-    echo "  ${TC_BIN}/${TC_VARIANT}-gcc"
+    echo "  ${INSTALL_DIR}/bin/${TC_COMPILER_PREFIX}gcc"
     exit 1
 fi
 
@@ -110,11 +119,10 @@ echo ""
 echo "============================================================"
 echo " Xtensa HiFi4 toolchain installed successfully!"
 echo ""
-echo "  Compiler : ${TC_BIN}/${TC_VARIANT}-gcc"
-echo "  Version  : $("${TC_BIN}/${TC_VARIANT}-gcc" --version 2>&1 | head -1)"
+echo "  Compiler : ${INSTALL_DIR}/bin/${TC_COMPILER_PREFIX}gcc"
+echo "  Version  : $("${INSTALL_DIR}/bin/${TC_COMPILER_PREFIX}gcc" --version 2>&1 | head -1)"
 echo ""
-echo " The DSP build scripts will detect this toolchain"
-echo " automatically. You can now run:"
+echo " You can now build the DSP firmware by running:"
 echo "   cd $(dirname "${SCRIPT_DIR}")"
 echo "   ./build.sh"
 echo "============================================================"
